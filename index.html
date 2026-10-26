@@ -138,9 +138,23 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);outline:none}
 .answer .big{font:700 clamp(20px,4vw,28px)/1.2 var(--display)}
 .verdict{font:900 18px var(--display);letter-spacing:.04em}
 .verdict.ok{color:var(--ok)}.verdict.no{color:var(--bad)}
-.ymwrap{position:relative;width:100%;max-width:560px;border-radius:12px;overflow:hidden}
+.ymbox{width:100%;max-width:560px;display:flex;flex-direction:column;gap:8px;margin:0 auto}
+.ymwrap{--hx:12%;--hy:50%;--hr:36px;position:relative;width:100%;border-radius:12px;overflow:hidden;touch-action:none}
 .ymwrap iframe{width:100%;height:244px;border:0;display:block}
-.ymwrap.masked iframe{filter:blur(9px) saturate(.6)}
+/* вуаль размывает плеер; круглое окошко оставляет видимой кнопку ▶, клики проходят насквозь */
+.ymveil{position:absolute;inset:0;pointer-events:none;display:none;
+  background:color-mix(in srgb,var(--bg) 40%,transparent);
+  -webkit-backdrop-filter:blur(12px) saturate(.6);backdrop-filter:blur(12px) saturate(.6);
+  -webkit-mask:radial-gradient(circle var(--hr) at var(--hx) var(--hy),transparent calc(100% - 1px),#000 100%);
+  mask:radial-gradient(circle var(--hr) at var(--hx) var(--hy),transparent calc(100% - 1px),#000 100%)}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.ymveil{background:var(--bg2)}}
+.ymwrap.masked .ymveil{display:block}
+.ymring{position:absolute;left:var(--hx);top:var(--hy);width:calc(var(--hr) * 2);height:calc(var(--hr) * 2);transform:translate(-50%,-50%);
+  border:2px dashed var(--gold);border-radius:50%;pointer-events:none;display:none}
+.ymadj{position:absolute;inset:0;display:none;cursor:crosshair}
+.ymwrap.adjust .ymring,.ymwrap.adjust .ymadj{display:block}
+.ymtools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:center;font-size:14px}
+.ymtools input[type=range]{width:140px;accent-color:var(--gold)}
 .teams{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;width:100%}
 .team{background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px;align-items:center}
 .team .pts{font:700 26px var(--mono);color:var(--gold)}
@@ -276,6 +290,61 @@ function ymPage(ref) {
   return m ? `https://music.yandex.ru/album/${m[1]}/track/${m[2]}` : "https://music.yandex.ru/";
 }
 const YM_ALLOW = "autoplay; encrypted-media; clipboard-write";
+// окошко над кнопкой ▶: положение в процентах и радиус в пикселях, общее для всех треков
+function ymHole() {
+  try { const h = JSON.parse(localStorage.getItem("melodika.ymHole")); if (h && isFinite(h.x)) return h; } catch {}
+  return { x: 12, y: 50, r: 36 };
+}
+function ymMarkup(src, id = "") {
+  return `<div class="ymbox" ${id ? `id="${id}"` : ""}>
+    <div class="ymwrap masked">
+      <iframe src="${esc(src)}" allow="${YM_ALLOW}" title="Плеер Яндекс Музыки"></iframe>
+      <div class="ymveil"></div><div class="ymring"></div><div class="ymadj" title="Нажмите или проведите, чтобы поставить окошко над кнопкой ▶"></div>
+    </div>
+    <div class="ymtools">
+      <button type="button" class="btn sm" data-ym="blur">Показать плеер</button>
+      <button type="button" class="btn sm ghost" data-ym="adjust">Настроить окошко</button>
+      <label class="row" style="gap:6px" data-ym="size" hidden>Размер <input type="range" min="16" max="90" step="1" aria-label="Размер окошка"></label>
+      <span class="muted" data-ym="hint" hidden>Поставьте круг на кнопку ▶</span>
+    </div>
+  </div>`;
+}
+function bindYm(box) {
+  if (!box || box.dataset.bound) return;
+  box.dataset.bound = "1";
+  const wrap = box.querySelector(".ymwrap"), adj = box.querySelector(".ymadj");
+  const bBlur = box.querySelector('[data-ym="blur"]'), bAdj = box.querySelector('[data-ym="adjust"]');
+  const size = box.querySelector('[data-ym="size"]'), range = size.querySelector("input"), hint = box.querySelector('[data-ym="hint"]');
+  let h = ymHole();
+  const apply = () => { wrap.style.setProperty("--hx", h.x + "%"); wrap.style.setProperty("--hy", h.y + "%"); wrap.style.setProperty("--hr", h.r + "px"); range.value = h.r; };
+  const save = () => { try { localStorage.setItem("melodika.ymHole", JSON.stringify(h)); } catch {} };
+  const syncBtns = () => {
+    bBlur.textContent = wrap.classList.contains("masked") ? "Показать плеер" : "Размыть плеер";
+    const on = wrap.classList.contains("adjust");
+    bAdj.textContent = on ? "Готово" : "Настроить окошко";
+    size.hidden = hint.hidden = !on;
+  };
+  box.syncYm = syncBtns;
+  apply(); syncBtns();
+  bBlur.onclick = () => { wrap.classList.toggle("masked"); if (!wrap.classList.contains("masked")) wrap.classList.remove("adjust"); syncBtns(); };
+  bAdj.onclick = () => {
+    const on = !wrap.classList.contains("adjust");
+    wrap.classList.toggle("adjust", on);
+    if (on) wrap.classList.add("masked"); else save();
+    syncBtns();
+  };
+  range.oninput = () => { h.r = +range.value; apply(); save(); };
+  let dragging = false;
+  const place = e => {
+    const b = wrap.getBoundingClientRect();
+    h.x = Math.round(Math.min(100, Math.max(0, (e.clientX - b.left) / b.width * 100)) * 10) / 10;
+    h.y = Math.round(Math.min(100, Math.max(0, (e.clientY - b.top) / b.height * 100)) * 10) / 10;
+    apply();
+  };
+  adj.onpointerdown = e => { dragging = true; adj.setPointerCapture?.(e.pointerId); place(e); };
+  adj.onpointermove = e => { if (dragging) place(e); };
+  adj.onpointerup = adj.onpointercancel = () => { dragging = false; save(); };
+}
 // Яндекс Музыка: из ссылки или HTML-кода виджета получаем адрес плеера
 function parseYandex(input) {
   input = input.trim();
@@ -709,7 +778,8 @@ function renderAddPane(qz) {
     const src = () => parseYandex($("#yLink").value);
     $("#yTest").onclick = () => {
       const s = src(); if (!s) return toast("Не получилось распознать ссылку Яндекс Музыки");
-      $("#yPrev").innerHTML = `<div class="ymwrap"><iframe src="${esc(s)}" allow="${YM_ALLOW}" title="Плеер Яндекс Музыки"></iframe></div>`;
+      $("#yPrev").innerHTML = ymMarkup(s) + `<p class="hint" style="text-align:center;margin:0">Так плеер будет выглядеть во время игры. Если кнопка ▶ не попала в окошко, нажмите «Настроить окошко» — положение запомнится для всех треков.</p>`;
+      bindYm($("#yPrev .ymbox"));
     };
     $("#yForm").onsubmit = e => {
       e.preventDefault();
@@ -1034,8 +1104,7 @@ function renderPlay() {
     <section class="stage" id="stage">
       <div id="promptBox"></div>
       <div class="disc" id="disc" ${textQ ? "hidden" : ""}></div>
-      ${q.source === "yandex" ? `<div class="ymwrap masked" id="ym" hidden>
-          <iframe src="${esc(ymSrc(q.ref))}" allow="${YM_ALLOW}" title="Плеер Яндекс Музыки"></iframe></div>` : ""}
+      ${q.source === "yandex" ? ymMarkup(ymSrc(q.ref), "ym") : ""}
       <div class="row" style="justify-content:center" id="controls"></div>
       <div class="timer" id="timer"><i id="bar"></i></div>
       <div class="tnum" id="tnum"></div>
@@ -1051,7 +1120,15 @@ function renderPlay() {
     : q.prompt ? `<h2 class="prompt">${esc(q.prompt)}</h2>` : `<span class="label">${esc(questionText(q))}</span>`;
   $("#disc").innerHTML = g.phase === "reveal" && q.cover ? `<img src="${esc(q.cover)}" alt="">` : "";
   $("#disc").classList.toggle("revealed", g.phase === "reveal" && !!q.cover);
-  if ($("#ym")) { $("#ym").hidden = g.phase === "ready"; $("#ym").classList.toggle("masked", g.phase !== "reveal"); }
+  if ($("#ym")) {
+    bindYm($("#ym"));
+    $("#ym").hidden = g.phase === "ready";
+    const w = $("#ym .ymwrap");
+    if (g.phase === "reveal") w.classList.remove("masked", "adjust");
+    else if (g.ymPhase !== g.phase) w.classList.add("masked"); // при новой фазе снова размываем
+    g.ymPhase = g.phase;
+    $("#ym").syncYm?.();
+  }
   $("#timer").hidden = g.phase === "ready";
   ["#ansBox", "#opts", "#teamsBox", "#tnum"].forEach(s => $(s).innerHTML = "");
   const controls = $("#controls");
@@ -1064,15 +1141,13 @@ function renderPlay() {
   } else if (g.phase === "listen") {
     let html = playable ? `<button class="btn" id="again">↻ Ещё раз</button>` : "";
     if (q.source === "yandex") {
-      html = `<button class="btn" id="unblur">${$("#ym").classList.contains("masked") ? "Показать плеер" : "Размыть плеер"}</button>
-         <a class="btn ghost" href="${esc(ymPage(q.ref))}" target="_blank" rel="noopener" title="Если плеер не играет — включите трек в Яндекс Музыке на другом устройстве">Открыть в Яндексе ↗</a>`;
+      html = `<a class="btn ghost" href="${esc(ymPage(q.ref))}" target="_blank" rel="noopener" title="Если плеер не играет — включите трек в Яндекс Музыке на другом устройстве">Открыть в Яндексе ↗</a>`;
       $("#tnum").dataset.hint = "1";
     }
     if (g.mode === "host" || !opts) html += `<button class="btn gold" id="reveal">Показать ответ</button>`;
     controls.innerHTML = html;
     $("#again") && ($("#again").onclick = () => replay(q));
     $("#reveal") && ($("#reveal").onclick = () => reveal(null));
-    $("#unblur") && ($("#unblur").onclick = () => { const w = $("#ym"); w.classList.toggle("masked"); $("#unblur").textContent = w.classList.contains("masked") ? "Показать плеер" : "Размыть плеер"; });
     if (!textQ) $("#disc").classList.toggle("spin", !audio.paused || q.source === "yandex");
   } else if (g.phase === "reveal") {
     const nextQ = g.order[g.i + 1];
