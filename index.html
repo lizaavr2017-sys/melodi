@@ -139,7 +139,7 @@ input:focus,select:focus,textarea:focus{border-color:var(--gold);outline:none}
 .verdict{font:900 18px var(--display);letter-spacing:.04em}
 .verdict.ok{color:var(--ok)}.verdict.no{color:var(--bad)}
 .ymbox{width:100%;max-width:560px;display:flex;flex-direction:column;gap:8px;margin:0 auto}
-.ymwrap{--hx:12%;--hy:50%;--hr:36px;position:relative;width:100%;border-radius:12px;overflow:hidden;touch-action:none}
+.ymwrap{--hx:31px;--hy:205px;--hr:24px;position:relative;width:100%;border-radius:12px;overflow:hidden;touch-action:none}
 .ymwrap iframe{width:100%;height:244px;border:0;display:block}
 /* вуаль размывает плеер; круглое окошко оставляет видимой кнопку ▶, клики проходят насквозь */
 .ymveil{position:absolute;inset:0;pointer-events:none;display:none;
@@ -290,10 +290,12 @@ function ymPage(ref) {
   return m ? `https://music.yandex.ru/album/${m[1]}/track/${m[2]}` : "https://music.yandex.ru/";
 }
 const YM_ALLOW = "autoplay; encrypted-media; clipboard-write";
-// окошко над кнопкой ▶: положение в процентах и радиус в пикселях, общее для всех треков
+// окошко над кнопкой ▶: центр в пикселях от левого верхнего угла плеера и радиус, общее для всех треков.
+// В виджете Яндекса кнопка ▶ стоит слева внизу на фиксированном месте, поэтому считаем в пикселях, а не в процентах.
+const YM_HOLE_DEFAULT = { x: 31, y: 205, r: 24 };
 function ymHole() {
-  try { const h = JSON.parse(localStorage.getItem("melodika.ymHole")); if (h && isFinite(h.x)) return h; } catch {}
-  return { x: 12, y: 50, r: 36 };
+  try { const h = JSON.parse(localStorage.getItem("melodika.ymHole2")); if (h && isFinite(h.x)) return h; } catch {}
+  return { ...YM_HOLE_DEFAULT };
 }
 function ymMarkup(src, id = "") {
   return `<div class="ymbox" ${id ? `id="${id}"` : ""}>
@@ -305,6 +307,7 @@ function ymMarkup(src, id = "") {
       <button type="button" class="btn sm" data-ym="blur">Показать плеер</button>
       <button type="button" class="btn sm ghost" data-ym="adjust">Настроить окошко</button>
       <label class="row" style="gap:6px" data-ym="size" hidden>Размер <input type="range" min="16" max="90" step="1" aria-label="Размер окошка"></label>
+      <button type="button" class="btn sm ghost" data-ym="reset" hidden>Сбросить</button>
       <span class="muted" data-ym="hint" hidden>Поставьте круг на кнопку ▶</span>
     </div>
   </div>`;
@@ -314,15 +317,16 @@ function bindYm(box) {
   box.dataset.bound = "1";
   const wrap = box.querySelector(".ymwrap"), adj = box.querySelector(".ymadj");
   const bBlur = box.querySelector('[data-ym="blur"]'), bAdj = box.querySelector('[data-ym="adjust"]');
+  const bReset = box.querySelector('[data-ym="reset"]');
   const size = box.querySelector('[data-ym="size"]'), range = size.querySelector("input"), hint = box.querySelector('[data-ym="hint"]');
   let h = ymHole();
-  const apply = () => { wrap.style.setProperty("--hx", h.x + "%"); wrap.style.setProperty("--hy", h.y + "%"); wrap.style.setProperty("--hr", h.r + "px"); range.value = h.r; };
-  const save = () => { try { localStorage.setItem("melodika.ymHole", JSON.stringify(h)); } catch {} };
+  const apply = () => { wrap.style.setProperty("--hx", h.x + "px"); wrap.style.setProperty("--hy", h.y + "px"); wrap.style.setProperty("--hr", h.r + "px"); range.value = h.r; };
+  const save = () => { try { localStorage.setItem("melodika.ymHole2", JSON.stringify(h)); } catch {} };
   const syncBtns = () => {
     bBlur.textContent = wrap.classList.contains("masked") ? "Показать плеер" : "Размыть плеер";
     const on = wrap.classList.contains("adjust");
     bAdj.textContent = on ? "Готово" : "Настроить окошко";
-    size.hidden = hint.hidden = !on;
+    size.hidden = hint.hidden = bReset.hidden = !on;
   };
   box.syncYm = syncBtns;
   apply(); syncBtns();
@@ -334,11 +338,12 @@ function bindYm(box) {
     syncBtns();
   };
   range.oninput = () => { h.r = +range.value; apply(); save(); };
+  bReset.onclick = () => { h = { ...YM_HOLE_DEFAULT }; apply(); save(); };
   let dragging = false;
   const place = e => {
     const b = wrap.getBoundingClientRect();
-    h.x = Math.round(Math.min(100, Math.max(0, (e.clientX - b.left) / b.width * 100)) * 10) / 10;
-    h.y = Math.round(Math.min(100, Math.max(0, (e.clientY - b.top) / b.height * 100)) * 10) / 10;
+    h.x = Math.round(Math.min(b.width, Math.max(0, e.clientX - b.left)));
+    h.y = Math.round(Math.min(b.height, Math.max(0, e.clientY - b.top)));
     apply();
   };
   adj.onpointerdown = e => { dragging = true; adj.setPointerCapture?.(e.pointerId); place(e); };
